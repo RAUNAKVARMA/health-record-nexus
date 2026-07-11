@@ -1,0 +1,3 @@
+{
+  "buildCommand": "prisma generate && (if [ -n \"$DATABASE_URL\" ]; then prisma db push; fi) && next build"
+}

@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  type         String
+  name         String
+  email        String?  @unique
+  healthId     String?  @unique
+  phoneNumber  String?
+  gender       String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  hospitalRecords  MedicalRecord[]  @relation("HospitalRecords")
+  patientRecords   MedicalRecord[]  @relation("PatientRecords")
+  hospitalConsents ConsentRequest[] @relation("HospitalConsents")
+  patientConsents  ConsentRequest[] @relation("PatientConsents")
+}
+
+model MedicalRecord {
+  id         String   @id @default(cuid())
+  patientId  String
+  hospitalId String
+  recordType String
+  fileName   String
+  fileMime   String
+  filePath   String
+  notes      String?
+  isApproved Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  patient        User            @relation("PatientRecords", fields: [patientId], references: [id])
+  hospital       User            @relation("HospitalRecords", fields: [hospitalId], references: [id])
+  consentRequest ConsentRequest?
+}
+
+model ConsentRequest {
+  id         String   @id @default(cuid())
+  type       String
+  patientId  String
+  hospitalId String
+  status     String   @default("pending")
+  recordId   String?  @unique
+  createdAt  DateTime @default(now())
+
+  patient  User           @relation("PatientConsents", fields: [patientId], references: [id])
+  hospital User           @relation("HospitalConsents", fields: [hospitalId], references: [id])
+  record   MedicalRecord? @relation(fields: [recordId], references: [id])
+}
