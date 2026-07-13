@@ -35,6 +35,10 @@ backend/.env
 backend/health_record.db
 backend/uploads/*
 !backend/uploads/.gitkeep
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
 
 # vercel
 .vercel
