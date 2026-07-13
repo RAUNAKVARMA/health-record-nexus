@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import {
   Hospital,
@@ -12,6 +11,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/components/providers/auth-provider";
+import { apiFetch, getApiUrl, getToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -37,7 +38,7 @@ type MedicalRecord = {
 };
 
 export default function HospitalDashboardPage() {
-  const { data: session, status } = useSession();
+  const { user, loading: authLoading, logout } = useAuth();
   const router = useRouter();
 
   const [patientName, setPatientName] = useState("");
@@ -57,39 +58,40 @@ export default function HospitalDashboardPage() {
   const [loadingRecords, setLoadingRecords] = useState(false);
 
   useEffect(() => {
-    if (status === "unauthenticated") router.push("/login");
-  }, [status, router]);
+    if (!authLoading && (!user || user.role !== "hospital")) {
+      router.push("/login");
+    }
+  }, [authLoading, user, router]);
 
   const handleGenerateHealthId = async () => {
-    const res = await fetch("/api/patients", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: patientName,
-        phoneNumber: patientPhone,
-        gender: patientGender,
-        password: patientPassword,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error || "Failed to register patient");
-      return;
+    try {
+      const data = await apiFetch<Patient>("/api/patients", {
+        method: "POST",
+        body: JSON.stringify({
+          name: patientName,
+          phoneNumber: patientPhone,
+          gender: patientGender,
+          password: patientPassword,
+        }),
+      });
+      setGeneratedHealthId(data.healthId);
+      toast.success(`Patient registered. Health ID: ${data.healthId}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to register patient");
     }
-    setGeneratedHealthId(data.healthId);
-    toast.success(`Patient registered. Health ID: ${data.healthId}`);
   };
 
   const handleVerifyPatient = async () => {
-    const res = await fetch(`/api/patients?healthId=${encodeURIComponent(uploadHealthId)}`);
-    const data = await res.json();
-    if (!res.ok) {
+    try {
+      const data = await apiFetch<Patient>(
+        `/api/patients?healthId=${encodeURIComponent(uploadHealthId)}`
+      );
+      setPatientFound(data);
+      toast.success(`Patient found: ${data.name}`);
+    } catch (e) {
       setPatientFound(null);
-      toast.error(data.error || "Patient not found");
-      return;
+      toast.error(e instanceof Error ? e.message : "Patient not found");
     }
-    setPatientFound(data);
-    toast.success(`Patient found: ${data.name}`);
   };
 
   const handleUploadRecord = async () => {
@@ -103,63 +105,76 @@ export default function HospitalDashboardPage() {
     form.append("notes", recordNotes);
     form.append("file", file);
 
-    const res = await fetch("/api/records", { method: "POST", body: form });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error || "Upload failed");
-      return;
+    try {
+      await apiFetch("/api/records", { method: "POST", body: form });
+      toast.success("Record uploaded. Waiting for patient consent.");
+      setUploadHealthId("");
+      setRecordType("Prescription");
+      setRecordNotes("");
+      setFile(null);
+      setPatientFound(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload failed");
     }
-    toast.success("Record uploaded. Waiting for patient consent.");
-    setUploadHealthId("");
-    setRecordType("Prescription");
-    setRecordNotes("");
-    setFile(null);
-    setPatientFound(null);
   };
 
   const handleRequestAccess = async () => {
-    const res = await fetch("/api/consent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ healthId: accessHealthId }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error || "Request failed");
-      return;
-    }
-    if (data.alreadyExists && data.status === "approved") {
-      toast.success("Access already granted");
-    } else if (data.alreadyExists) {
-      toast.info("Access request already pending");
-    } else {
-      toast.success("Access requested. Waiting for patient approval.");
+    try {
+      const data = await apiFetch<{
+        status: string;
+        alreadyExists?: boolean;
+      }>("/api/consent", {
+        method: "POST",
+        body: JSON.stringify({ healthId: accessHealthId }),
+      });
+      if (data.alreadyExists && data.status === "approved") {
+        toast.success("Access already granted");
+      } else if (data.alreadyExists) {
+        toast.info("Access request already pending");
+      } else {
+        toast.success("Access requested. Waiting for patient approval.");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Request failed");
     }
   };
 
   const handleViewApprovedRecords = async () => {
     setLoadingRecords(true);
-    const res = await fetch(`/api/records?healthId=${encodeURIComponent(accessHealthId)}`);
-    const data = await res.json();
-    setLoadingRecords(false);
-    if (!res.ok) {
-      toast.error(data.error || "Failed to load records");
-      return;
+    try {
+      const data = await apiFetch<MedicalRecord[]>(
+        `/api/records?healthId=${encodeURIComponent(accessHealthId)}`
+      );
+      setAccessibleRecords(data);
+      toast.success(data.length ? `Found ${data.length} records` : "No approved records found");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load records");
+    } finally {
+      setLoadingRecords(false);
     }
-    setAccessibleRecords(data);
-    toast.success(data.length ? `Found ${data.length} records` : "No approved records found");
   };
 
-  const downloadRecord = (recordId: string, fileName: string) => {
+  const downloadRecord = async (recordId: string, fileName: string) => {
+    const token = getToken();
+    const res = await fetch(`${getApiUrl()}/api/files/${recordId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      toast.error("Download failed");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = `/api/files/${recordId}`;
+    link.href = url;
     link.download = fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
-  if (status === "loading") {
+  if (authLoading || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-cyan-700" />
@@ -179,13 +194,14 @@ export default function HospitalDashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-white text-sm hidden sm:block">
-              {session?.user?.name}
-            </span>
+            <span className="text-white text-sm hidden sm:block">{user.name}</span>
             <Button
               variant="outline"
               className="bg-white/10 hover:bg-white/20 text-white border-white/30"
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={() => {
+                logout();
+                router.push("/login");
+              }}
             >
               <LogOut className="w-4 h-4 mr-2" />
               Logout
@@ -206,7 +222,9 @@ export default function HospitalDashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Generate Patient Health ID</CardTitle>
-                <CardDescription>Register a new patient and generate their 14-digit Health ID</CardDescription>
+                <CardDescription>
+                  Register a new patient and generate their 14-digit Health ID
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid sm:grid-cols-2 gap-4">
@@ -223,7 +241,9 @@ export default function HospitalDashboardPage() {
                     <select
                       className="flex h-10 w-full rounded-md border border-cyan-200 bg-white px-3 py-2 text-sm"
                       value={patientGender}
-                      onChange={(e) => setPatientGender(e.target.value as "male" | "female" | "other")}
+                      onChange={(e) =>
+                        setPatientGender(e.target.value as "male" | "female" | "other")
+                      }
                     >
                       <option value="male">Male</option>
                       <option value="female">Female</option>
@@ -232,16 +252,20 @@ export default function HospitalDashboardPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Password</Label>
-                    <Input type="password" value={patientPassword} onChange={(e) => setPatientPassword(e.target.value)} />
+                    <Input
+                      type="password"
+                      value={patientPassword}
+                      onChange={(e) => setPatientPassword(e.target.value)}
+                    />
                   </div>
                 </div>
-                <Button onClick={handleGenerateHealthId}>
-                  Generate Health ID
-                </Button>
+                <Button onClick={handleGenerateHealthId}>Generate Health ID</Button>
                 {generatedHealthId && (
                   <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-4">
                     <p className="text-sm text-cyan-800">Generated Health ID</p>
-                    <p className="text-2xl font-mono font-bold text-cyan-900">{generatedHealthId}</p>
+                    <p className="text-2xl font-mono font-bold text-cyan-900">
+                      {generatedHealthId}
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -252,7 +276,9 @@ export default function HospitalDashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Upload Medical Record</CardTitle>
-                <CardDescription>Upload a record for a patient (requires patient consent)</CardDescription>
+                <CardDescription>
+                  Upload a record for a patient (requires patient consent)
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex gap-2">
@@ -287,7 +313,11 @@ export default function HospitalDashboardPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Upload File</Label>
-                  <Input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.txt" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                  <Input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.txt"
+                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Notes (optional)</Label>
@@ -305,7 +335,9 @@ export default function HospitalDashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Access Patient Records</CardTitle>
-                <CardDescription>Request permission to view a patient&apos;s medical records</CardDescription>
+                <CardDescription>
+                  Request permission to view a patient&apos;s medical records
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex gap-2">
@@ -314,9 +346,14 @@ export default function HospitalDashboardPage() {
                     value={accessHealthId}
                     onChange={(e) => setAccessHealthId(e.target.value)}
                   />
-                  <Button variant="outline" onClick={handleRequestAccess}>Request Access</Button>
+                  <Button variant="outline" onClick={handleRequestAccess}>
+                    Request Access
+                  </Button>
                 </div>
-                <Button onClick={handleViewApprovedRecords} disabled={loadingRecords || !accessHealthId}>
+                <Button
+                  onClick={handleViewApprovedRecords}
+                  disabled={loadingRecords || !accessHealthId}
+                >
                   {loadingRecords ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -341,7 +378,9 @@ export default function HospitalDashboardPage() {
                         {accessibleRecords.map((record) => (
                           <tr key={record.id} className="border-t">
                             <td className="p-3">{record.recordType}</td>
-                            <td className="p-3">{new Date(record.createdAt).toLocaleDateString()}</td>
+                            <td className="p-3">
+                              {new Date(record.createdAt).toLocaleDateString()}
+                            </td>
                             <td className="p-3">{record.hospital.name}</td>
                             <td className="p-3">
                               <Button

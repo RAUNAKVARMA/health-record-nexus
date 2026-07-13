@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import {
   LogOut,
@@ -14,6 +13,8 @@ import {
   Hospital as HospitalIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/components/providers/auth-provider";
+import { apiFetch, getApiUrl, getToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,7 +44,7 @@ type ConsentRequest = {
 };
 
 export default function PatientDashboardPage() {
-  const { data: session, status } = useSession();
+  const { user, loading: authLoading, logout } = useAuth();
   const router = useRouter();
   const [records, setRecords] = useState<MedicalRecord[]>([]);
   const [requests, setRequests] = useState<ConsentRequest[]>([]);
@@ -51,45 +52,62 @@ export default function PatientDashboardPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [recordsRes, consentRes] = await Promise.all([
-      fetch("/api/records"),
-      fetch("/api/consent"),
-    ]);
-    if (recordsRes.ok) setRecords(await recordsRes.json());
-    if (consentRes.ok) setRequests(await consentRes.json());
-    setLoading(false);
+    try {
+      const [recs, consents] = await Promise.all([
+        apiFetch<MedicalRecord[]>("/api/records"),
+        apiFetch<ConsentRequest[]>("/api/consent"),
+      ]);
+      setRecords(recs);
+      setRequests(consents);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load data");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (status === "unauthenticated") router.push("/login");
-    if (status === "authenticated") loadData();
-  }, [status, router, loadData]);
-
-  const handleConsent = async (requestId: string, decision: "approved" | "rejected") => {
-    const res = await fetch("/api/consent", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId, status: decision }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error || "Failed to update request");
+    if (!authLoading && (!user || user.role !== "patient")) {
+      router.push("/login");
       return;
     }
-    toast.success(decision === "approved" ? "Request approved" : "Request rejected");
-    loadData();
+    if (user?.role === "patient") loadData();
+  }, [authLoading, user, router, loadData]);
+
+  const handleConsent = async (requestId: string, decision: "approved" | "rejected") => {
+    try {
+      await apiFetch("/api/consent", {
+        method: "PATCH",
+        body: JSON.stringify({ requestId, status: decision }),
+      });
+      toast.success(decision === "approved" ? "Request approved" : "Request rejected");
+      loadData();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update request");
+    }
   };
 
-  const downloadRecord = (recordId: string, fileName: string) => {
+  const downloadRecord = async (recordId: string, fileName: string) => {
+    const token = getToken();
+    const res = await fetch(`${getApiUrl()}/api/files/${recordId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      toast.error("Download failed");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = `/api/files/${recordId}`;
+    link.href = url;
     link.download = fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
-  if (status === "loading" || loading) {
+  if (authLoading || loading || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-cyan-700" />
@@ -104,13 +122,16 @@ export default function PatientDashboardPage() {
           <div className="text-white">
             <h1 className="text-xl font-bold">Patient Dashboard</h1>
             <p className="text-cyan-100 text-sm">
-              {session?.user?.name} · Health ID: {session?.user?.healthId}
+              {user.name} · Health ID: {user.healthId}
             </p>
           </div>
           <Button
             variant="outline"
             className="bg-white/10 hover:bg-white/20 text-white border-white/30"
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={() => {
+              logout();
+              router.push("/login");
+            }}
           >
             <LogOut className="w-4 h-4 mr-2" />
             Logout
@@ -144,12 +165,17 @@ export default function PatientDashboardPage() {
                   </div>
                 ) : (
                   records.map((record) => (
-                    <div key={record.id} className="border rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div
+                      key={record.id}
+                      className="border rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <FileText className="w-4 h-4 text-cyan-700" />
                           <span className="font-semibold">{record.recordType}</span>
-                          <Badge className="text-green-700 border-green-300 bg-green-50 border">Approved</Badge>
+                          <Badge className="text-green-700 border-green-300 bg-green-50 border">
+                            Approved
+                          </Badge>
                         </div>
                         <p className="text-sm text-muted-foreground flex items-center gap-1">
                           <HospitalIcon className="w-3 h-3" />
@@ -160,7 +186,11 @@ export default function PatientDashboardPage() {
                         </p>
                         {record.notes && <p className="text-sm mt-1">{record.notes}</p>}
                       </div>
-                      <Button size="sm" variant="outline" onClick={() => downloadRecord(record.id, record.fileName)}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadRecord(record.id, record.fileName)}
+                      >
                         <Download className="w-4 h-4 mr-1" />
                         Download
                       </Button>
@@ -175,7 +205,9 @@ export default function PatientDashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Pending Consent Requests</CardTitle>
-                <CardDescription>Approve or reject requests from healthcare providers</CardDescription>
+                <CardDescription>
+                  Approve or reject requests from healthcare providers
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {requests.length === 0 ? (
@@ -202,7 +234,9 @@ export default function PatientDashboardPage() {
                             </p>
                           )}
                         </div>
-                        <Badge className="text-amber-700 border-amber-300 bg-amber-50 border">Pending</Badge>
+                        <Badge className="text-amber-700 border-amber-300 bg-amber-50 border">
+                          Pending
+                        </Badge>
                       </div>
                       <div className="flex gap-2">
                         <Button

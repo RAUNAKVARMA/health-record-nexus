@@ -1,18 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Hospital } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login, registerHospital, registerPatient } = useAuth();
   const [loading, setLoading] = useState(false);
 
   const [loginType, setLoginType] = useState<"hospital" | "patient">("hospital");
@@ -32,57 +40,33 @@ export default function LoginPage() {
 
   const handleLogin = async () => {
     setLoading(true);
-    const identifier = loginType === "hospital" ? email : healthId;
-    const result = await signIn("credentials", {
-      identifier,
-      password,
-      loginType,
-      redirect: false,
-    });
-    setLoading(false);
-
-    if (result?.error) {
-      toast.error("Invalid credentials. Please try again.");
-      return;
+    try {
+      const user = await login({
+        identifier: loginType === "hospital" ? email : healthId,
+        password,
+        loginType,
+      });
+      toast.success("Login successful");
+      router.push(user.role === "hospital" ? "/hospital" : "/patient");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Login failed");
+    } finally {
+      setLoading(false);
     }
-
-    toast.success("Login successful");
-    router.push(loginType === "hospital" ? "/hospital" : "/patient");
-    router.refresh();
   };
 
   const handleHospitalRegister = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "hospital",
-          name: hospitalName,
-          email: hospitalEmail,
-          password: hospitalPassword,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || "Registration failed");
-        return;
-      }
-
-      const result = await signIn("credentials", {
-        identifier: hospitalEmail,
+      await registerHospital({
+        name: hospitalName,
+        email: hospitalEmail,
         password: hospitalPassword,
-        loginType: "hospital",
-        redirect: false,
       });
-      if (result?.error) {
-        toast.error("Registered but login failed. Please sign in manually.");
-        return;
-      }
-      toast.success(`Welcome, ${data.name}!`);
+      toast.success("Hospital registered");
       router.push("/hospital");
-      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -91,40 +75,17 @@ export default function LoginPage() {
   const handlePatientRegister = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "patient",
-          name: patientName,
-          phoneNumber: patientPhone,
-          gender: patientGender,
-          password: patientPassword,
-          healthId: generatedHealthId || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || "Registration failed");
-        return;
-      }
-
-      const id = data.healthId;
-      setGeneratedHealthId(id);
-
-      const result = await signIn("credentials", {
-        identifier: id,
+      const user = await registerPatient({
+        name: patientName,
+        phoneNumber: patientPhone,
+        gender: patientGender,
         password: patientPassword,
-        loginType: "patient",
-        redirect: false,
       });
-      if (result?.error) {
-        toast.error("Registered but login failed. Please sign in with your Health ID.");
-        return;
-      }
-      toast.success(`Welcome, ${data.name}! Health ID: ${id}`);
+      if (user.healthId) setGeneratedHealthId(user.healthId);
+      toast.success(`Welcome! Health ID: ${user.healthId}`);
       router.push("/patient");
-      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -155,7 +116,10 @@ export default function LoginPage() {
               </TabsList>
 
               <TabsContent value="login" className="space-y-4">
-                <Tabs value={loginType} onValueChange={(v) => setLoginType(v as "hospital" | "patient")}>
+                <Tabs
+                  value={loginType}
+                  onValueChange={(v) => setLoginType(v as "hospital" | "patient")}
+                >
                   <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="hospital">Hospital</TabsTrigger>
                     <TabsTrigger value="patient">Patient</TabsTrigger>
@@ -207,11 +171,19 @@ export default function LoginPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Email</Label>
-                  <Input type="email" value={hospitalEmail} onChange={(e) => setHospitalEmail(e.target.value)} />
+                  <Input
+                    type="email"
+                    value={hospitalEmail}
+                    onChange={(e) => setHospitalEmail(e.target.value)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Password</Label>
-                  <Input type="password" value={hospitalPassword} onChange={(e) => setHospitalPassword(e.target.value)} />
+                  <Input
+                    type="password"
+                    value={hospitalPassword}
+                    onChange={(e) => setHospitalPassword(e.target.value)}
+                  />
                 </div>
                 <Button className="w-full" onClick={handleHospitalRegister} disabled={loading}>
                   Register Hospital
@@ -232,7 +204,9 @@ export default function LoginPage() {
                   <select
                     className="flex h-10 w-full rounded-md border border-cyan-200 bg-white px-3 py-2 text-sm"
                     value={patientGender}
-                    onChange={(e) => setPatientGender(e.target.value as "male" | "female" | "other")}
+                    onChange={(e) =>
+                      setPatientGender(e.target.value as "male" | "female" | "other")
+                    }
                   >
                     <option value="male">Male</option>
                     <option value="female">Female</option>
@@ -241,7 +215,11 @@ export default function LoginPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Password</Label>
-                  <Input type="password" value={patientPassword} onChange={(e) => setPatientPassword(e.target.value)} />
+                  <Input
+                    type="password"
+                    value={patientPassword}
+                    onChange={(e) => setPatientPassword(e.target.value)}
+                  />
                 </div>
                 {generatedHealthId && (
                   <p className="text-sm text-cyan-800 bg-cyan-50 p-3 rounded-md">
@@ -254,7 +232,7 @@ export default function LoginPage() {
               </TabsContent>
             </Tabs>
           </CardContent>
-          <CardFooter className="text-xs text-muted-foreground justify-center text-cyan-700">
+          <CardFooter className="text-xs justify-center text-cyan-700">
             Secure interoperable health record exchange — Smart India Hackathon
           </CardFooter>
         </Card>

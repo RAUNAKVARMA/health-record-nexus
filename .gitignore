@@ -31,6 +31,10 @@ yarn-error.log*
 # env files
 .env
 .env*.local
+backend/.env
+backend/health_record.db
+backend/uploads/*
+!backend/uploads/.gitkeep
 
 # vercel
 .vercel
@@ -39,7 +43,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# prisma / uploads
+# prisma / uploads (legacy)
 /prisma/dev.db
 /prisma/dev.db-journal
 /uploads/*

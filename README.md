@@ -1,83 +1,102 @@
 # Health Record Nexus Secure
 
-Secure backend platform for interoperable medical record exchange with role-based access, patient consent workflows, and encrypted data handling.
+Secure platform for interoperable medical record exchange with role-based access and patient consent workflows.
 
-Built for **Smart India Hackathon (SIH)** — enables hospitals and patients to share medical records safely with explicit consent at every step.
+Built for **Smart India Hackathon (SIH)**.
+
+## Architecture
+
+- **Frontend:** Next.js (UI only) on port `3000`
+- **Backend:** FastAPI + SQLAlchemy on port `8000`
+- **Database:** SQLite locally by default; PostgreSQL via Docker Compose when available
+
+```
+Browser → Next.js UI → FastAPI (/api/*) → SQLite or PostgreSQL
+                                    └→ uploads/
+```
 
 ## Features
 
-- **Hospital portal** — register patients, generate 14-digit Health IDs, upload records, request access to patient history
-- **Patient portal** — view approved records, approve or reject upload and access consent requests
-- **Consent-first design** — no record is visible until the patient explicitly approves
-- **Secure auth** — bcrypt password hashing, JWT sessions via Auth.js
-- **File storage** — local disk in development, Vercel Blob in production
+- Hospital portal — register patients, Health IDs, upload records, request access
+- Patient portal — approve/reject consent, view and download approved records
+- Consent-first design — records stay private until the patient approves
+- JWT auth with bcrypt password hashing
 
-## Tech stack
+## Deploy backend on Render
 
-- [Next.js 16](https://nextjs.org) (App Router) + TypeScript
-- [Prisma](https://www.prisma.io) + PostgreSQL
-- [Auth.js](https://authjs.dev) (NextAuth v5)
-- [Tailwind CSS](https://tailwindcss.com) + shadcn-style UI components
-- [Vercel Blob](https://vercel.com/docs/storage/vercel-blob) for production file uploads
+1. Push this repo to GitHub
+2. Open [Render Blueprint](https://dashboard.render.com/select-repo?type=blueprint) and select this repository
+3. Render reads `render.yaml` and creates:
+   - **Web Service** `health-record-nexus-api` (FastAPI)
+   - **Postgres** `health-record-nexus-db`
+4. After deploy, API URL looks like: `https://health-record-nexus-api.onrender.com`
+5. Set frontend `NEXT_PUBLIC_API_URL` to that URL (Vercel env + redeploy)
+
+Health check: `GET /api/health` · Docs: `/docs`
+
+**Note:** Free Render web services sleep after inactivity (cold start ~30–60s). Uploaded files on the free tier are ephemeral unless you add a persistent disk.
 
 ## Getting started
 
-### Prerequisites
-
-- Node.js 20+
-- PostgreSQL database (local Docker, [Neon](https://neon.tech), or Vercel Postgres)
-
-### Setup
+### 1. Backend
 
 ```bash
-git clone https://github.com/RAUNAKVARMA/health-record-nexus-secure.git
-cd health-record-nexus-secure
-cp .env.example .env
+cd backend
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+uvicorn app.main:app --reload --port 8000
+```
+
+API docs: http://localhost:8000/docs
+
+### 2. Frontend
+
+```bash
+# from project root
 npm install --legacy-peer-deps
-npm run db:push
+# .env.local should contain:
+# NEXT_PUBLIC_API_URL=http://localhost:8000
 npm run dev
 ```
 
-Open [http://localhost:3000/login](http://localhost:3000/login)
+Open http://localhost:3000/login
 
-### Environment variables
+### Optional: PostgreSQL with Docker
 
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string |
-| `AUTH_SECRET` | Random secret for session signing (`openssl rand -base64 32`) |
-| `AUTH_TRUST_HOST` | Set to `true` for production |
-| `BLOB_READ_WRITE_TOKEN` | Vercel Blob token (production file uploads only) |
+```bash
+docker compose up -d
+```
+
+Then in `backend/.env`:
+
+```
+DATABASE_URL=postgresql+psycopg2://health:health@localhost:5432/health_record
+```
 
 ## Demo flow
 
-1. Register a **Hospital** on the login page
-2. Generate a patient **Health ID** from the hospital dashboard
-3. Upload a medical record (PDF, JPG, PNG, etc.)
-4. Log in as **Patient** with the Health ID and approve the consent request
-5. Hospital can view and download approved records; other hospitals need a separate access request
+1. Register a **Hospital**
+2. Generate a patient **Health ID**
+3. Upload a medical record
+4. Log in as **Patient** and approve the consent request
+5. Hospital can view/download approved records
 
-## Deploy on Vercel
+## API overview
 
-1. Push this repo to GitHub and import it in [Vercel](https://vercel.com)
-2. Add a **Neon Postgres** integration (or set `DATABASE_URL` manually)
-3. Add **Vercel Blob** storage for file uploads
-4. Set `AUTH_SECRET` and `AUTH_TRUST_HOST=true`
-5. Deploy — the build runs `prisma db push` automatically when `DATABASE_URL` is set
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/RAUNAKVARMA/health-record-nexus-secure)
-
-## Project structure
-
-```
-src/app/
-  login/          Auth & registration
-  hospital/       Hospital dashboard
-  patient/        Patient dashboard
-  api/            REST endpoints (auth, records, consent, files)
-prisma/           Database schema
-uploads/          Local file storage (dev only)
-```
+| Method | Path | Role |
+|--------|------|------|
+| POST | `/api/auth/register/hospital` | public |
+| POST | `/api/auth/register/patient` | public |
+| POST | `/api/auth/login` | public |
+| POST | `/api/patients` | hospital |
+| GET | `/api/patients?healthId=` | hospital |
+| POST | `/api/records` | hospital (multipart) |
+| GET | `/api/records` | patient / hospital |
+| GET/POST/PATCH | `/api/consent` | patient / hospital |
+| GET | `/api/files/{id}` | authorized |
 
 ## License
 
