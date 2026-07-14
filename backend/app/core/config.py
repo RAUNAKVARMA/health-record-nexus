@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     )
     uploads_dir: str = str(UPLOADS_DIR)
 
+    # Supabase Storage (optional — used when both URL + service role key are set)
+    supabase_url: str = "https://dwqnpfjaxnkbvjrypdgv.supabase.co"
+    supabase_service_role_key: str = ""
+    supabase_bucket: str = "health-record-files"
+
     @property
     def sqlalchemy_database_url(self) -> str:
         return normalize_database_url(self.database_url)

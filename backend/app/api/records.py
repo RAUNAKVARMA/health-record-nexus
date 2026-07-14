@@ -46,7 +46,7 @@ async def upload_record(
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    stored = store_file(file.filename or "upload.bin", content)
+    stored = store_file(file.filename or "upload.bin", content, mime)
     record = MedicalRecord(
         patient_id=patient.id,
         hospital_id=hospital.id,

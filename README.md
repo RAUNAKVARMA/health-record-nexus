@@ -22,6 +22,19 @@ Browser → Next.js UI → FastAPI (/api/*) → SQLite or PostgreSQL
 - Consent-first design — records stay private until the patient approves
 - JWT auth with bcrypt password hashing
 
+## File storage (Supabase)
+
+Uploads go to **Supabase Storage** when these env vars are set on Render:
+
+```
+SUPABASE_URL=https://dwqnpfjaxnkbvjrypdgv.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SUPABASE_BUCKET=health-record-files
+```
+
+Create a **private** bucket named `health-record-files` in the Supabase dashboard.
+Without these keys, the API falls back to local `backend/uploads/` (dev only).
+
 ## Deploy backend on Render
 
 1. Push this repo to GitHub

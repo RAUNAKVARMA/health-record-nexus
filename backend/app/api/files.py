@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.models import ConsentRequest, MedicalRecord, User
 from app.db.session import get_db
 from app.deps import get_current_user
-from app.services.storage import resolve_file_path
+from app.services.storage import read_file_bytes
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -40,12 +40,14 @@ def download_file(
     if not is_patient_owner and not hospital_has_access:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    path = resolve_file_path(record.file_path)
-    if not path.exists():
+    data = read_file_bytes(record.file_path)
+    if data is None:
         raise HTTPException(status_code=404, detail="File missing on server")
 
-    return FileResponse(
-        path,
+    return Response(
+        content=data,
         media_type=record.file_mime,
-        filename=record.file_name,
+        headers={
+            "Content-Disposition": f'attachment; filename="{record.file_name.replace(chr(34), "")}"'
+        },
     )
