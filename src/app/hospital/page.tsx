@@ -211,10 +211,10 @@ export default function HospitalDashboardPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
-        <Tabs defaultValue="generate">
+        <Tabs defaultValue="upload">
           <TabsList className="grid w-full grid-cols-3 mb-6 bg-white/90">
-            <TabsTrigger value="generate">Generate Health ID</TabsTrigger>
             <TabsTrigger value="upload">Upload Record</TabsTrigger>
+            <TabsTrigger value="generate">Generate Health ID</TabsTrigger>
             <TabsTrigger value="access">Access Records</TabsTrigger>
           </TabsList>
 

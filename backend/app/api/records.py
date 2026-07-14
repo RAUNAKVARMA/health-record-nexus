@@ -3,32 +3,37 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import ConsentRequest, MedicalRecord, User
 from app.db.session import get_db
-from app.deps import get_current_user, require_hospital
-from app.schemas import RecordOut
+from app.deps import get_current_user
+from app.schemas import HospitalBrief, RecordOut
 from app.services.storage import ALLOWED_TYPES, store_file
 
 router = APIRouter(prefix="/records", tags=["records"])
 
 
 def _serialize(record: MedicalRecord) -> RecordOut:
+    # Patient self-uploads reuse hospital_id = patient_id
+    if record.hospital_id == record.patient_id:
+        hospital = HospitalBrief(id=record.hospital_id, name="Self upload")
+    else:
+        hospital = HospitalBrief(id=record.hospital.id, name=record.hospital.name)
     return RecordOut(
         id=record.id,
         record_type=record.record_type,
         file_name=record.file_name,
         notes=record.notes,
         created_at=record.created_at,
-        hospital=record.hospital,
+        hospital=hospital,
     )
 
 
 @router.post("")
 async def upload_record(
-    healthId: str = Form(...),
     recordType: str = Form(...),
     notes: str = Form(""),
     file: UploadFile = File(...),
+    healthId: str | None = Form(None),
     db: Session = Depends(get_db),
-    hospital: User = Depends(require_hospital),
+    user: User = Depends(get_current_user),
 ):
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
@@ -40,6 +45,29 @@ async def upload_record(
             detail="Unsupported file type. Use PDF, JPG, PNG, WEBP, GIF, or TXT.",
         )
 
+    # Patient uploads their own record — auto-approved, no consent needed
+    if user.type == "patient":
+        stored = store_file(file.filename or "upload.bin", content, mime)
+        record = MedicalRecord(
+            patient_id=user.id,
+            hospital_id=user.id,
+            record_type=recordType,
+            file_name=file.filename or "upload.bin",
+            file_mime=mime,
+            file_path=stored,
+            notes=notes or None,
+            is_approved=True,
+        )
+        db.add(record)
+        db.commit()
+        return {"recordId": record.id, "status": "approved", "source": "patient"}
+
+    if user.type != "hospital":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if not healthId:
+        raise HTTPException(status_code=400, detail="healthId is required")
+
     patient = (
         db.query(User).filter(User.type == "patient", User.health_id == healthId).first()
     )
@@ -49,7 +77,7 @@ async def upload_record(
     stored = store_file(file.filename or "upload.bin", content, mime)
     record = MedicalRecord(
         patient_id=patient.id,
-        hospital_id=hospital.id,
+        hospital_id=user.id,
         record_type=recordType,
         file_name=file.filename or "upload.bin",
         file_mime=mime,
@@ -62,7 +90,7 @@ async def upload_record(
     consent = ConsentRequest(
         type="upload",
         patient_id=patient.id,
-        hospital_id=hospital.id,
+        hospital_id=user.id,
         status="pending",
         record_id=record.id,
     )

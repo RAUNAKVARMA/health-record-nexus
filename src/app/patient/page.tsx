@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  FileUp,
   Hospital as HospitalIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,6 +19,9 @@ import { apiFetch, getApiUrl, getToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type MedicalRecord = {
@@ -49,6 +53,10 @@ export default function PatientDashboardPage() {
   const [records, setRecords] = useState<MedicalRecord[]>([]);
   const [requests, setRequests] = useState<ConsentRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [recordType, setRecordType] = useState("Prescription");
+  const [recordNotes, setRecordNotes] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -84,6 +92,31 @@ export default function PatientDashboardPage() {
       loadData();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to update request");
+    }
+  };
+
+  const handleUploadRecord = async () => {
+    if (!file) {
+      toast.error("Select a file first");
+      return;
+    }
+    const form = new FormData();
+    form.append("recordType", recordType);
+    form.append("notes", recordNotes);
+    form.append("file", file);
+
+    setUploading(true);
+    try {
+      await apiFetch("/api/records", { method: "POST", body: form });
+      toast.success("Record uploaded successfully");
+      setRecordType("Prescription");
+      setRecordNotes("");
+      setFile(null);
+      await loadData();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -140,8 +173,9 @@ export default function PatientDashboardPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
-        <Tabs defaultValue="records">
-          <TabsList className="grid w-full grid-cols-2 mb-6 bg-white/90">
+        <Tabs defaultValue="upload">
+          <TabsList className="grid w-full grid-cols-3 mb-6 bg-white/90">
+            <TabsTrigger value="upload">Upload Record</TabsTrigger>
             <TabsTrigger value="records">My Medical Records</TabsTrigger>
             <TabsTrigger value="consent" className="relative">
               Consent Requests
@@ -150,6 +184,64 @@ export default function PatientDashboardPage() {
               )}
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="upload">
+            <Card>
+              <CardHeader>
+                <CardTitle>Upload Medical Record</CardTitle>
+                <CardDescription>
+                  Add your own records (PDF, images, or text). They appear immediately in your
+                  records.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Record Type</Label>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-cyan-200 bg-white px-3 py-2 text-sm"
+                    value={recordType}
+                    onChange={(e) => setRecordType(e.target.value)}
+                  >
+                    <option>Prescription</option>
+                    <option>Lab Report</option>
+                    <option>Discharge Summary</option>
+                    <option>Radiology Report</option>
+                    <option>Consultation Note</option>
+                    <option>Insurance / Other</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Upload File</Label>
+                  <Input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.txt"
+                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Notes (optional)</Label>
+                  <Textarea
+                    value={recordNotes}
+                    onChange={(e) => setRecordNotes(e.target.value)}
+                    placeholder="Optional notes about this record"
+                  />
+                </div>
+                <Button onClick={handleUploadRecord} disabled={uploading || !file}>
+                  {uploading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <FileUp className="w-4 h-4 mr-2" />
+                      Upload Record
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           <TabsContent value="records">
             <Card>
